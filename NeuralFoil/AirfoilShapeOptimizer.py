@@ -6,8 +6,8 @@ import aerosandbox.tools.pretty_plots as p
 Re = 1e8
 mach = 0.85
 
-initial_guess_airfoil = asb.KulfanAirfoil("naca4412")
-initial_guess_airfoil.name = "Initial Guess (NACA4412)"
+initial_guess_airfoil = asb.KulfanAirfoil("naca00012")
+initial_guess_airfoil.name = "Initial Guess (NA00012)"
 
 opti = asb.Opti()
 
@@ -47,7 +47,7 @@ opti.subject_to(
         optimized_airfoil.upper_weights[0] > 0.05,
         optimized_airfoil.local_thickness(np.linspace(0.01, 0.99)) > 0,
         optimized_airfoil.TE_angle() >= 0,
-        np.abs(aero["CM"]) <= 0.05
+        aero["CM"] <= 0.05
     ]
 )
 
