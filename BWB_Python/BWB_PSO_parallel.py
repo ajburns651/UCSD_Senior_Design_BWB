@@ -20,7 +20,7 @@ from CostFunctions import Cost
 from Marimo import gross_weight
 
 USE_PARALLEL = True
-N_PROCESSES = max(1, mp.cpu_count() - 4)
+N_PROCESSES = max(1, mp.cpu_count() // 2)
 
 
 # DELETE OLD VSP
@@ -38,12 +38,11 @@ Ntolb = 4.44822
 # ============================================================
 
 # Geometry
-Nominal_Spans = np.array([4.08, 6.50, 19.00, 2.00])
-Nominal_Sweeps = np.array([62.00, 67.00, 37.00, 40.00])
+Nominal_Spans = np.array([4.08, 6.50, 19.00, 2])
+Nominal_Sweeps = np.array([62.00, 67.00, 37.00, 37.00])
 
 Nominal_Roots = np.array([43.00, 31.18, 5.00, 3.00])
-Nominal_wing_tip = np.array([0.80])
-
+Nominal_wing_tip = np.array([0.999])
 Nominal_Tips = np.append(Nominal_Roots[1:], Nominal_wing_tip[0])
 
 Nominal_Dihedrals = np.array([0.00, 0.00, 8.00, 9.25])
@@ -68,8 +67,8 @@ Variance2 = 2
 # 2. BUILD PSO BOUNDS
 # ============================================================
 
-span_lb = np.array([4.08, 6.50, Nominal_Spans[2]* (1 - Variance), Nominal_Spans[3]* (1 - Variance)])
-span_ub = Nominal_Spans * (1 + Variance)
+span_lb = np.array([4.08, 6.50, Nominal_Spans[2]* (1 - Variance), 0.1])
+span_ub = Nominal_Spans * np.array([1 + Variance,1 + Variance,1 + Variance,5/Nominal_Spans[-1]])
 
 sweep_lb = Nominal_Sweeps * (1 - Variance)
 sweep_ub = MAX_sweeps
@@ -208,7 +207,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     Root_moments = normalized_moments * Sref * b * q
 
     # Compute Section 3 Stress
-    mat_allowable = 510*10^6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    mat_allowable = 510*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
     spar_cap_area = .02       # m^2 (assumed???)
     FOS = 1.5                 # Factor Of Safety
 
@@ -231,7 +230,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
         ]
     else:
         extensions_to_delete = [
-            ".txt", ".avl", ".csv", ".run", '_CompGeom.csv', '_CompGeom.txt', '_np.txt','_ParasiteBuildUp.csv', ".vsp3"
+            ".txt", ".avl", ".csv", ".run", '_CompGeom.csv', '_CompGeom.txt', '_moment.txt', '_np.txt','_ParasiteBuildUp.csv', ".vsp3"
         ]
 
     for ext in extensions_to_delete:
@@ -252,41 +251,55 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
         "Root Moments": Root_moments,
         "Section 3 Stress": section3_stress,
         "Root Chords": root_chords,
+        "Spans": spans,
         "Cost_Per_Hour": Cost_per_hr,
     }
 
 def constraint_penalty(result):
     penalty = 0.0
+    LD_ref = 25.0  # reference objective scale
 
     # == Static Margin ==
-    SM = result["Static_Margin"]
-    SM_takeoff = SM[0]
-
-    if SM_takeoff < 0: # Hard Constraint
-        penalty += 500 * (-SM_takeoff)/15
-    elif SM_takeoff > 15: # Soft Constraint
-        penalty += 50 * (SM_takeoff - 15)/15
+    SM_takeoff = result["Static_Margin"][0]
+    if SM_takeoff < 0:           # Hard: -1 unit → 2× L/D_ref
+        penalty += LD_ref * 2.0 * (-SM_takeoff / 15)
+    elif SM_takeoff > 15:        # Soft: nudge only
+        penalty += LD_ref * 0.2 * ((SM_takeoff - 15) / 15)
 
     # == Bending Moments ==
     moments = result["Root Moments"]
-    rhoot_cs = result["Root Chords"]
-    mat_allowable = 510*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
-    spar_cap_area = .02       # m^2 (assumed???)
+    root_cs = result["Root Chords"]
+    mat_allowable = 510e6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    spar_cap_area = 0.02       # m^2 (assumed???)
     FOS = 1.5                 # Factor Of Safety
 
     # Compute Stress in Section 3
     section3_moment = moments[2]
-    section3_rc = rhoot_cs[2]
+    section3_rc = root_cs[2]
     section3_y = (.07 * section3_rc)/2 # t/c * chord length divided by 2
     moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
 
     section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
+    stress_ratio = (section3_stress * FOS) / mat_allowable
 
-    if section3_stress * FOS > mat_allowable:
-        penalty += 500 * (section3_stress * FOS - mat_allowable)/mat_allowable
-    elif section3_stress * FOS > .9*mat_allowable:
-        penalty += 10 * (section3_stress * FOS - .9*mat_allowable)/(.9*mat_allowable)
+    if stress_ratio > 1.0:       # Hard: 10% over → 1× L/D_ref
+        penalty += LD_ref * 10.0 * (stress_ratio - 1.0)
+    elif stress_ratio > 0.9:     # Soft warning band
+        penalty += LD_ref * 0.5 * ((stress_ratio - 0.9) / 0.1)
 
+    # == Folding Wing Constraint ==
+    spans = result["Spans"]
+    cumspan3 = np.sum(spans[0:3])
+    span4 = spans[3]
+
+    if cumspan3 > 32.5:         # Hard: 1m error → ~1× L/D_ref
+        penalty += LD_ref * 2.0 * (abs(cumspan3 - 32.5) / 32.5)
+
+    if span4 > 5:                # Hard
+        penalty += LD_ref * 2.0 * ((span4 - 5) / 5)
+    elif span4 > 4.5:              # Soft
+        penalty += LD_ref * 0.1 * ((span4 - 3) / 3)
+    
     return penalty
 
 
@@ -345,10 +358,6 @@ def pso_cost_parallel(X):
         args = [(X[i], i) for i in range(X.shape[0])]
         costs = pool.map(evaluate_particle, args)
 
-    if min(costs) > 0:
-        print('Best Iteration Valid Design L/D: N/A')
-    else:
-        print(f'Best Iteration Valid Design L/D: {-min(costs)}')
     return np.array(costs)
 
 
@@ -377,7 +386,7 @@ if __name__ == "__main__":
     options = {"c1": 1, "c2": 2.0, "w": 0.5}
 
     optimizer = ps.single.GlobalBestPSO(
-        n_particles=20,
+        n_particles=75,
         dimensions=N_VARS,
         options=options,
         bounds=bounds,
@@ -385,7 +394,7 @@ if __name__ == "__main__":
 
     best_cost, best_pos = optimizer.optimize(
         pso_cost,
-        iters=8,
+        iters=40,
         verbose=True,
     )
 

@@ -23,7 +23,7 @@ def generate_avl_file(
     Bref=None,
     Xcg=20.0,
     airfoil_inboard="naca25111.dat",
-    airfoil_outboard="mh78.dat",
+    airfoil_outboard="SC0410.dat",
     fin_root_chord=3.72,
     fin_tip_chord=1.39,
     fin_y_root=4.10,
