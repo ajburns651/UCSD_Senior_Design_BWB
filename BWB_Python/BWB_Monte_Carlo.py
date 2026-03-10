@@ -1,12 +1,13 @@
 # ────────────────────────────────────────────────
 # 155A BWB - Multi Design Iteration Script
 # ────────────────────────────────────────────────
-import openvsp as vsp
 import numpy as np
+import openvsp as vsp
 import pandas as pd
 import os
+from pathlib import Path
+import shutil
 
-# --- MOVE IMPORTS TO TOP (Speedup: Prevents re-loading modules 50 times) ---
 from OpenVSPHooks import GrabParams
 from WeightFunctions import CGNPSM, Weights
 from AeroFunctions import Aero_Driver, compute_density
@@ -20,11 +21,11 @@ from Marimo import gross_weight
 M2Ft = 3.28084
 Ntolb = 4.44822
 
-def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals, 
-                   range_m, mach, payload_N, tsfc, altitude, 
+def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
+                   range_m, mach, payload_N, tsfc, altitude,
                    run_id, save_vsp=False):
 
-    # 0. COMPUTE WEIGHT FRACTIONS
+     # 0. COMPUTE WEIGHT FRACTIONS
     weight_dict = gross_weight.compute_fractions(Wp=payload_N, R=range_m, LD = 23.42, cT=tsfc) # Here we fix LD to our BCR value, and payload weight is constant
     fuel_frac = weight_dict["Ws_Wg"]
 
@@ -32,92 +33,163 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     vsp.ClearVSPModel()
     vsp.ReadVSPFile('SeniorDesign.vsp3')
 
-    # Locate the wing geometry id values
     wing_id = vsp.FindGeomsWithName("BodyandWing")[0]
     vstabalizer_id = vsp.FindGeomsWithName("VStabalizer")[0]
 
+    tip_chords = np.append(root_chords[1:], tip_chords[3])
+
+    # --- UPDATE GEOMETRY ---
     for i in range(len(spans)):
-        vsp.SetParmVal(wing_id, "Span", f"XSec_{i+1}", spans[i])
-        vsp.SetParmVal(wing_id, "Root_Chord", f"XSec_{i+1}", root_chords[i])
-        vsp.SetParmVal(wing_id, "Tip_Chord", f"XSec_{i+1}", tip_chords[i])
-        vsp.SetParmVal(wing_id, "Sweep", f"XSec_{i+1}", sweeps[i])
-        vsp.SetParmVal(wing_id, "InLESweep", f"XSec_{i+1}", sweeps[i])
-        vsp.SetParmVal(wing_id, "Dihedral", f"XSec_{i+1}", dihedrals[i])
+        vsp.SetParmVal(wing_id, "Span", f"XSec_{i + 1}", spans[i])
+        vsp.SetParmVal(wing_id, "Root_Chord", f"XSec_{i + 1}", root_chords[i])
+        vsp.SetParmVal(wing_id, "Tip_Chord", f"XSec_{i + 1}", tip_chords[i])
+        vsp.SetParmVal(wing_id, "Sweep", f"XSec_{i + 1}", sweeps[i])
+        vsp.SetParmVal(wing_id, "Dihedral", f"XSec_{i + 1}", dihedrals[i])
         vsp.Update()
 
-    basefilename = f"MC_Run_{run_id}"
+    # Create Matching Angles For Outward Wings
+    vsp.SetParmVal(wing_id, "InLESweep", f"XSec_3", sweeps[2])
+    vsp.Update()
+
+    basefilename = f"PSO_Run_{run_id}"
     vspfilename = f"{basefilename}.vsp3"
     vsp.WriteVSPFile(vspfilename)
 
     # 2. RUN CALCULATIONS
-    Sref, Swet, WS_areas, VStabalizer_area, MAC, AR = GrabParams.sizing(vspfilename, wing_id, vstabalizer_id, len(spans))
-    CD0 = GrabParams.parasite(vspfilename, altitude, mach) # Replaced Obj['Altitude'], Obj['Mach']
-    WS_trs = np.array([tip / root for root, tip in zip(root_chords, tip_chords)]) 
+    Sref, Swet, WS_areas, VStabalizer_area, MAC, AR, b = GrabParams.sizing(
+        vspfilename, wing_id, vstabalizer_id, len(spans))
 
-    # Compute Inputs
-    b = sum(spans)*2
-    Wing_wetted_Area = Swet/Sref * (WS_areas[2] + WS_areas[3]) * (M2Ft **2) # Wing Area (Last 2 Sections) (Ft^2)
-    Fuselage_wetted_Area = Swet/Sref * (WS_areas[0] + WS_areas[1]) * (M2Ft **2) # Fuselage Area (First 2 Sections) (Ft^2)
-    Wing_sweep = sweeps[2] # Outer Wing Sweep (deg)
-    Wing_taper = WS_trs[2] # Outer Wing Taper
-    Vt_area = 2*VStabalizer_area * (M2Ft **2) # Area of Vertical Tail (Ft^2)
-    Length_tail = .55 * root_chords[0] * M2Ft # Aproximated (ft)
-    Length_fuselage = root_chords[0] * M2Ft   # Feet
-    Diameter_fuselage = (spans[0] + 1.15)*2 * M2Ft # Feet (Includes 1.15m cargo space) 
-    Payload_lb = payload_N / Ntolb # Payload weight (lb)
+    CD0 = GrabParams.parasite(vspfilename, altitude, mach)
+    WS_trs = np.array([tip / root for root, tip in zip(root_chords, tip_chords)])
 
-    # Find Weights
-    Weight_Distributions = Weights.estimate_aircraft_weights(plot_pie=False, export_csv=False, Sw=Wing_wetted_Area, AR=AR,lambda_outer_deg=Wing_sweep,taper=Wing_taper,V_mach=mach, Svt=Vt_area, Sf = Fuselage_wetted_Area, Lt_ft=Length_tail,L_ft=Length_fuselage,D_ft=Diameter_fuselage,payload_lb=Payload_lb,fuel_fraction=fuel_frac)
+    # --- DERIVED GEOMETRY ---
+    # Compute Wingspan (Due to sweep)
+    Wing_wetted_Area = Swet / Sref * (WS_areas[2] + WS_areas[3]) * (M2Ft ** 2)
+    Fuselage_wetted_Area = Swet / Sref * (WS_areas[0] + WS_areas[1]) * (M2Ft ** 2)
+    Wing_sweep = sweeps[2]
+    Wing_taper = WS_trs[2]
+    Vt_area = 2 * VStabalizer_area * (M2Ft ** 2)
+    Length_tail = .55 * root_chords[0] * M2Ft
+    Length_fuselage = root_chords[0] * M2Ft
+    Diameter_fuselage = (spans[0] + 1.15) * 2 * M2Ft
+    Payload_lb = payload_N / Ntolb
 
-    # Compute Inputs
+    # --- WEIGHTS ---
+    Weight_Distributions = Weights.estimate_aircraft_weights(
+        plot_pie=False, export_csv=False,
+        Sw=Wing_wetted_Area, AR=AR,
+        lambda_outer_deg=Wing_sweep,
+        taper=Wing_taper,
+        V_mach=mach,
+        Svt=Vt_area,
+        Sf=Fuselage_wetted_Area,
+        Lt_ft=Length_tail,
+        L_ft=Length_fuselage,
+        D_ft=Diameter_fuselage,
+        payload_lb=Payload_lb,
+        fuel_fraction=fuel_frac)
+
     rho = compute_density.compute(altitude)
+    q = .5 * rho * (mach * 295.1)**2
     MTOW = Weight_Distributions['weights_N']['total']
-    plotting_flag = False
-    printing_flag = False
 
-    # Get Aero Vals
-    LD_cruise, CL_cruise, Alpha_cruise, CDi_cruise, CDw_cruise, CD_total_cruise = Aero_Driver.bwb_cruise_analysis(plotting_flag,printing_flag,AR,b,Diameter_fuselage,sweeps,root_chords,Swet/Sref,WS_areas,mach,CD0,rho,MTOW)
+    LD_cruise, CL_cruise, Alpha_cruise, CDi_cruise, CDw_cruise, CD_total_cruise = Aero_Driver.bwb_cruise_analysis(
+                                                                    False, False, AR, b, Diameter_fuselage, sweeps,
+                                                                    root_chords, Swet / Sref, WS_areas, mach, CD0, rho, MTOW)
 
-    # Compute Inputs
+    # --- OFFSETS ---
     Offsets = np.zeros(len(spans))
-    Offsets[0] = 0.0  # root section starts at 0 (nose or front reference)
     for i in range(1, len(spans)):
-        # Cumulative X offset due to previous sweep and span
-        prev_span = spans[i-1]
-        prev_sweep = sweeps[i-1]
-        Offsets[i] = Offsets[i-1] + prev_span * np.tan(np.radians(prev_sweep))
+        Offsets[i] = Offsets[i - 1] + spans[i - 1] * np.tan(np.radians(sweeps[i - 1]))
 
-    # Compute Center of Gravity, Neutral Point, and Static Margin
-    CG = CGNPSM.compute_cg(Weight_Distributions['percentages'],WS_trs,root_chords,spans,sweeps,WS_areas*2,Offsets,MAC,mach,LD_cruise,range_m,tsfc)
-    AVL.generate_avl_file(spans, root_chords, tip_chords, sweeps, dihedrals,f'{basefilename}.avl',basefilename,mach,Sref,MAC,b,CG[0])
-    NP = AVL.get_neutral_point_from_avl(base_name = basefilename, alpha_cruise = Alpha_cruise,avl_executable = r"C:\Users\ajbur\OneDrive\Desktop\School\MAE FILES\BURNS\MAE 155A\BWB_Python\AVLFunctions\avl352.exe",timeout_seconds = 15)
-    SM = 100 * (NP - CG)/MAC
+    CG = CGNPSM.compute_cg(
+        Weight_Distributions['percentages'], WS_trs,
+        root_chords, spans, sweeps,
+        WS_areas * 2, Offsets, MAC, mach,
+        LD_cruise, range_m, tsfc)
 
-    # Compute Cost
-    plotting_flag = False
-    Cost_per_hr = Cost.compute_per_hour_cost(plotting_flag,tsfc,LD_cruise,MTOW) # Compute Per Hour Cost
+    # After generate_avl_file, copy airfoil files into the same dir as the .avl
+    avl_dir = Path(f'{basefilename}.avl').resolve().parent
+    for src_dir in [Path('./AVLFunctions'), Path('.')]:
+        for dat in src_dir.glob('*.dat'):
+            dest = avl_dir / dat.name
+            if not dest.exists():  # skip if already there
+                try:
+                    shutil.copy2(dat, dest)
+                except (OSError, shutil.Error):
+                    pass  # another worker already copied it, that's fine
 
-    # 3. CLEANUP TEMPORARY FILES
-    extensions_to_delete = [".txt",".avl",".vsp3","_CompGeom.csv", "_CompGeom.txt", "_ParasiteBuildUp.csv"]
+    AVL.generate_avl_file(
+        spans, root_chords, tip_chords, sweeps, dihedrals,
+        f'{basefilename}.avl', basefilename,
+        mach, Sref, MAC, b, CG[0])
+
+    NP = AVL.get_neutral_point_from_avl(
+        base_name=basefilename,
+        alpha_cruise=Alpha_cruise,
+        CL_cruise=CL_cruise,
+        rho=rho,
+        avl_executable=r".\AVLFunctions\avl352.exe",
+        timeout_seconds=15)
+    
+    normalized_moments = AVL.get_root_moment_from_avl(
+        base_name=basefilename,
+        alpha_cruise=Alpha_cruise,
+        CL_cruise=CL_cruise,
+        WS_spans=spans,
+        rho=rho,
+        avl_executable=r".\AVLFunctions\avl352.exe",
+        timeout_seconds=15)
+    Root_moments = normalized_moments * Sref * b * q
+
+    # Compute Section 3 Stress
+    mat_allowable = 510*10^6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    spar_cap_area = .02       # m^2 (assumed???)
+    FOS = 1.5                 # Factor Of Safety
+
+    # Compute Stress in Section 3
+    section3_moment = Root_moments[2]
+    section3_rc = root_chords[2]
+    section3_y = (.1447 * section3_rc)/2 # t/c * chord length divided by 2
+    moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
+
+    section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
+ 
+    SM = 100 * (NP - CG) / MAC
+
+    Cost_per_hr = Cost.compute_per_hour_cost(False, tsfc, LD_cruise, MTOW)
+
+    # --- CLEANUP ---
+    if save_vsp:
+        extensions_to_delete = [
+            ".txt", ".csv", ".run", '_CompGeom.csv', '_CompGeom.txt', '_moment.txt', '_np.txt', '_ParasiteBuildUp.csv'
+        ]
+    else:
+        extensions_to_delete = [
+            ".txt", ".avl", ".csv", ".run", '_CompGeom.csv', '_CompGeom.txt', '_np.txt','_ParasiteBuildUp.csv', ".vsp3"
+        ]
+
     for ext in extensions_to_delete:
         file_path = f"{basefilename}{ext}"
         if os.path.exists(file_path):
-            try: os.remove(file_path)
-            except PermissionError: pass 
+            try:
+                os.remove(file_path)
+            except PermissionError:
+                pass
 
-    # 4. RETURN DESIRED DATA
     return {
         "Run_ID": run_id,
-        # Save Outputs
         "MTOW": MTOW,
         "L_D_Cruise": LD_cruise,
-        "Range": range_m,
+        "Range (Nmi)": range_m / 1852,
         "Static_Margin": SM,
-        "Span_Total": sum(spans)*2,
-        "Cost_Per_Hour": Cost_per_hr, 
-        "Dimension Inputs": [spans, root_chords, tip_chords, sweeps, dihedrals], # Includes all varying parameters
-        "Mission Inputs": [range_m], # Includes all varying parameters
-        }
+        "Wingspan": b,
+        "Root Moments": Root_moments,
+        "Section 3 Stress": section3_stress,
+        "Root Chords": root_chords,
+        "Cost_Per_Hour": Cost_per_hr,
+    }
+
 
 # ────────────────────────────────────────────────
 # 1. PARALLEL WRAPPER FUNCTION
@@ -166,9 +238,8 @@ if __name__ == '__main__':
     MAX_sweeps = np.array([65, 65, 45, 45])      # Constraint to get feasible geometry
 
     # --- CONFIGURE SIMULATION ---
-    N_Simulations = 1000 
-    Variance = 0.3                              # +/- 30% variation
-    Range_Variance = [.6, .1]
+    N_Simulations = 1 
+    Variance = 0.0                              # +/- 30% variation
     Range_Variance = [0, 0]
 
     # Step A: Pre-generate all the randomized inputs (tasks)

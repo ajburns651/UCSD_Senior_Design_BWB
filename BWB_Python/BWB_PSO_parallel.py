@@ -22,6 +22,14 @@ from Marimo import gross_weight
 USE_PARALLEL = True
 N_PROCESSES = max(1, mp.cpu_count() - 4)
 
+
+# DELETE OLD VSP
+files = ["PSO_Run_Optimized_Plane_Design.avl", "PSO_Run_Optimized_Plane_Design.vsp3"]
+
+for file in files:
+    if os.path.exists(file):
+        os.remove(file)
+
 M2Ft = 3.28084
 Ntolb = 4.44822
 
@@ -67,16 +75,13 @@ sweep_lb = Nominal_Sweeps * (1 - Variance)
 sweep_ub = MAX_sweeps
 
 root_lb = MIN_rootcs
-root_ub = Nominal_Roots * (1 + Variance2)
+root_ub = Nominal_Roots * np.array([1 + Variance,1 + Variance,1 + Variance2,1 + Variance])
 
 tip_lb = MIN_tipcs
 tip_ub = Nominal_Tips * (1 + Variance)
 
-dihedrals_lb = np.array([-2.00, -4.00, -8.00, -10.00])
-dihedrals_ub = np.array([2.00, 4.00, 8.00, 10.00])
-
-lower_bounds = np.concatenate([span_lb, root_lb, tip_lb, sweep_lb, dihedrals_lb])
-upper_bounds = np.concatenate([span_ub, root_ub, tip_ub, sweep_ub, dihedrals_ub])
+lower_bounds = np.concatenate([span_lb, root_lb, tip_lb, sweep_lb])
+upper_bounds = np.concatenate([span_ub, root_ub, tip_ub, sweep_ub])
 bounds = (lower_bounds, upper_bounds)
 
 N_VARS = len(lower_bounds)
@@ -187,6 +192,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     NP = AVL.get_neutral_point_from_avl(
         base_name=basefilename,
         alpha_cruise=Alpha_cruise,
+        CL_cruise=CL_cruise,
         rho=rho,
         avl_executable=r".\AVLFunctions\avl352.exe",
         timeout_seconds=15)
@@ -200,6 +206,19 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
         avl_executable=r".\AVLFunctions\avl352.exe",
         timeout_seconds=15)
     Root_moments = normalized_moments * Sref * b * q
+
+    # Compute Section 3 Stress
+    mat_allowable = 510*10^6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    spar_cap_area = .02       # m^2 (assumed???)
+    FOS = 1.5                 # Factor Of Safety
+
+    # Compute Stress in Section 3
+    section3_moment = Root_moments[2]
+    section3_rc = root_chords[2]
+    section3_y = (.1447 * section3_rc)/2 # t/c * chord length divided by 2
+    moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
+
+    section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
  
     SM = 100 * (NP - CG) / MAC
 
@@ -231,6 +250,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
         "Static_Margin": SM,
         "Wingspan": b,
         "Root Moments": Root_moments,
+        "Section 3 Stress": section3_stress,
         "Root Chords": root_chords,
         "Cost_Per_Hour": Cost_per_hr,
     }
@@ -243,14 +263,14 @@ def constraint_penalty(result):
     SM_takeoff = SM[0]
 
     if SM_takeoff < 0: # Hard Constraint
-        penalty += 500 * (-SM_takeoff)
-    elif SM_takeoff > 25: # Soft Constraint
-        penalty += 50 * (SM_takeoff - 25)
+        penalty += 500 * (-SM_takeoff)/15
+    elif SM_takeoff > 15: # Soft Constraint
+        penalty += 50 * (SM_takeoff - 15)/15
 
     # == Bending Moments ==
     moments = result["Root Moments"]
     rhoot_cs = result["Root Chords"]
-    mat_allowable = 510*10^6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    mat_allowable = 510*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
     spar_cap_area = .02       # m^2 (assumed???)
     FOS = 1.5                 # Factor Of Safety
 
@@ -263,9 +283,9 @@ def constraint_penalty(result):
     section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
 
     if section3_stress * FOS > mat_allowable:
-        penalty += 1000 * (section3_stress * FOS - mat_allowable)
+        penalty += 500 * (section3_stress * FOS - mat_allowable)/mat_allowable
     elif section3_stress * FOS > .9*mat_allowable:
-        penalty += 100 * (section3_stress * FOS - .9*mat_allowable)
+        penalty += 10 * (section3_stress * FOS - .9*mat_allowable)/(.9*mat_allowable)
 
     return penalty
 
@@ -357,7 +377,7 @@ if __name__ == "__main__":
     options = {"c1": 1, "c2": 2.0, "w": 0.5}
 
     optimizer = ps.single.GlobalBestPSO(
-        n_particles=40,
+        n_particles=20,
         dimensions=N_VARS,
         options=options,
         bounds=bounds,
