@@ -233,6 +233,7 @@ def estimate_aircraft_weights(
     # ────────────────────────────────────────────────
     # PIE CHART (improved to match MATLAB: interleave small slices + custom label positions)
     # ────────────────────────────────────────────────
+    plot_pie = True
     if plot_pie:
         labels = component_names[:-1]  # exclude Total
         percents = np.array([percentages[attr] for attr in attr_names])

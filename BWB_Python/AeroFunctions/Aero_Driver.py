@@ -88,7 +88,6 @@ def bwb_cruise_analysis(plotting_flag,printing_flag,AspectRatio,Wingspan,Fuselag
 
     # ================= PLOTTING =================
     LD_cruise = CL_cruise / CD_total_cruise
-
     if plotting_flag==True:
         from AeroFunctions import plot_aero_parameters
         plot_aero_parameters.plot_aero(CL, CD, CL_cruise, CD_total_cruise, LD_cruise, geom, aoa_deg)

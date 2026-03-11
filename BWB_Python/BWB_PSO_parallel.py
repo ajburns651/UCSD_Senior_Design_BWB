@@ -38,14 +38,11 @@ Ntolb = 4.44822
 # ============================================================
 
 # Geometry
-Nominal_Spans = np.array([4.08, 6.50, 19.00, 2])
-Nominal_Sweeps = np.array([62.00, 67.00, 37.00, 37.00])
-
-Nominal_Roots = np.array([43.00, 31.18, 5.00, 3.00])
-Nominal_wing_tip = np.array([0.999])
-Nominal_Tips = np.append(Nominal_Roots[1:], Nominal_wing_tip[0])
-
-Nominal_Dihedrals = np.array([0.00, 0.00, 8.00, 9.25])
+Nominal_Spans = np.array([ 4.10492,  9.39952, 17.15494,  4.14384])
+Nominal_Sweeps = np.array([66.57265,55.08672, 46.98989, 48.44947])
+Nominal_Roots      = np.array([44.63859, 31.85050,  6.10464,   0.93630])
+Nominal_Tips       = np.array( [31.85050,  6.10464,  0.93630,  0.13714])
+Nominal_Dihedrals  = np.array([0.00, 0.00, 8.00, 9.25])
 
 # Mission
 Nominal_Range = 7000 * 1852
@@ -56,19 +53,19 @@ Nominal_Fuel_Frac = 0.36
 Nominal_TSFC = 1.415e-5
 
 # Constraints
-MIN_rootcs = np.array([43.0, 31.18, 4, 1])
-MIN_tipcs = np.array([31.18, 6, 1, .1])
+MIN_rootcs = np.array([43.0, 31.18, 6, 1.3])
+MIN_tipcs = np.array([31.18, 6, 1.3, .5])
 MAX_sweeps = np.array([67, 67, 45, 45])
 
-Variance = 0.30
-Variance2 = 2
+Variance = 0.1
+Variance2 = .1
 
 # ============================================================
 # 2. BUILD PSO BOUNDS
 # ============================================================
 
-span_lb = np.array([4.08, 6.50, Nominal_Spans[2]* (1 - Variance), 0.1])
-span_ub = Nominal_Spans * np.array([1 + Variance,1 + Variance,1 + Variance,5/Nominal_Spans[-1]])
+span_lb = np.array([4.08, 6.50, Nominal_Spans[2]* (1 - Variance), 3])
+span_ub = Nominal_Spans * np.array([1 + Variance,7.5/Nominal_Spans[1],1 + Variance,5/Nominal_Spans[-1]])
 
 sweep_lb = Nominal_Sweeps * (1 - Variance)
 sweep_ub = MAX_sweeps
@@ -90,7 +87,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
                    run_id, save_vsp=False):
 
      # 0. COMPUTE WEIGHT FRACTIONS
-    weight_dict = gross_weight.compute_fractions(Wp=payload_N, R=range_m, LD = 23.42, cT=tsfc) # Here we fix LD to our BCR value, and payload weight is constant
+    weight_dict = gross_weight.compute_fractions(Wp=payload_N, R=range_m, LD = 24, cT=tsfc) # Here we fix LD to our BCR value, and payload weight is constant
     fuel_frac = weight_dict["Ws_Wg"]
 
     # 1. UPDATE VSP GEOMETRY
@@ -207,14 +204,12 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     Root_moments = normalized_moments * Sref * b * q
 
     # Compute Section 3 Stress
-    mat_allowable = 510*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
-    spar_cap_area = .02       # m^2 (assumed???)
-    FOS = 1.5                 # Factor Of Safety
+    spar_cap_area = .02       # m^2 (assumed???)y
 
     # Compute Stress in Section 3
     section3_moment = Root_moments[2]
     section3_rc = root_chords[2]
-    section3_y = (.1447 * section3_rc)/2 # t/c * chord length divided by 2
+    section3_y = (.07 * section3_rc)/2 # t/c * chord length divided by 2
     moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
 
     section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
@@ -267,25 +262,14 @@ def constraint_penalty(result):
         penalty += LD_ref * 0.2 * ((SM_takeoff - 15) / 15)
 
     # == Bending Moments ==
-    moments = result["Root Moments"]
-    root_cs = result["Root Chords"]
-    mat_allowable = 510e6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
-    spar_cap_area = 0.02       # m^2 (assumed???)
+    mat_allowable = 430*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
     FOS = 1.5                 # Factor Of Safety
 
-    # Compute Stress in Section 3
-    section3_moment = moments[2]
-    section3_rc = root_cs[2]
-    section3_y = (.07 * section3_rc)/2 # t/c * chord length divided by 2
-    moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
+    # Compute Stress Ratio in Section 3
+    stress_ratio = (result["Section 3 Stress"] * FOS) / mat_allowable
 
-    section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
-    stress_ratio = (section3_stress * FOS) / mat_allowable
-
-    if stress_ratio > 1.0:       # Hard: 10% over → 1× L/D_ref
-        penalty += LD_ref * 10.0 * (stress_ratio - 1.0)
-    elif stress_ratio > 0.9:     # Soft warning band
-        penalty += LD_ref * 0.5 * ((stress_ratio - 0.9) / 0.1)
+    if stress_ratio > .9:       # Hard: 10% over → 1× L/D_ref
+        penalty += LD_ref * 20.0 * (stress_ratio - .9)/.1
 
     # == Folding Wing Constraint ==
     spans = result["Spans"]
@@ -297,8 +281,8 @@ def constraint_penalty(result):
 
     if span4 > 5:                # Hard
         penalty += LD_ref * 2.0 * ((span4 - 5) / 5)
-    elif span4 > 4.5:              # Soft
-        penalty += LD_ref * 0.1 * ((span4 - 3) / 3)
+    elif span4 > 4:              # Soft
+        penalty += LD_ref * 0.1 * ((span4 - 4) / 4)
     
     return penalty
 
@@ -386,7 +370,7 @@ if __name__ == "__main__":
     options = {"c1": 1, "c2": 2.0, "w": 0.5}
 
     optimizer = ps.single.GlobalBestPSO(
-        n_particles=75,
+        n_particles=25,
         dimensions=N_VARS,
         options=options,
         bounds=bounds,
@@ -394,7 +378,7 @@ if __name__ == "__main__":
 
     best_cost, best_pos = optimizer.optimize(
         pso_cost,
-        iters=40,
+        iters=20,
         verbose=True,
     )
 

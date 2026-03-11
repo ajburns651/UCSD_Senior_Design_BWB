@@ -143,14 +143,14 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     Root_moments = normalized_moments * Sref * b * q
 
     # Compute Section 3 Stress
-    mat_allowable = 510*10^6  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    mat_allowable = 510*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
     spar_cap_area = .02       # m^2 (assumed???)
     FOS = 1.5                 # Factor Of Safety
 
     # Compute Stress in Section 3
     section3_moment = Root_moments[2]
     section3_rc = root_chords[2]
-    section3_y = (.1447 * section3_rc)/2 # t/c * chord length divided by 2
+    section3_y = (.07 * section3_rc)/2 # t/c * chord length divided by 2
     moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
 
     section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
@@ -162,7 +162,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     # --- CLEANUP ---
     if save_vsp:
         extensions_to_delete = [
-            ".txt", ".csv", ".run", '_CompGeom.csv', '_CompGeom.txt', '_moment.txt', '_np.txt', '_ParasiteBuildUp.csv'
+            ".txt", ".csv", ".run", '_CompGeom.csv', '_CompGeom.txt', '_np.txt', '_ParasiteBuildUp.csv'
         ]
     else:
         extensions_to_delete = [
@@ -219,10 +219,11 @@ def run_simulation(args):
 if __name__ == '__main__':
     # --- DEFINE NOMINALS ---
     # Geometry
-    Nominal_Spans = np.array([4.46351676,  7.8394856,  23.3415505, 2.33815741])
-    Nominal_Sweeps = np.array([62.03301726, 60.99887757, 43.07284845, 40.44181654])
-    Nominal_Roots = np.array([44.47919744, 32.0062888,   8.04649305,  0.84268331])
-    Nominal_Tips = np.array([32.0062888, 8.04649305,  0.84268331,  0.26620108])
+    Nominal_Spans = np.array([4.08654,  7.28272,  17.10197, 4.05377])
+    Nominal_Sweeps = np.array([62.47886, 64.38714, 40.23984, 40.03606])
+
+    Nominal_Roots = np.array([43.57478, 32.33918,   6.68997,  1.16213])
+    Nominal_Tips = np.array([32.33918, 6.68997,  1.16213,  0.49380])
     Nominal_Dihedrals = np.array([0.00, 0.00, 8.00, 9.25])
 
     # Mission/Performance
