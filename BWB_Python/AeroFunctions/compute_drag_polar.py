@@ -4,11 +4,11 @@ import numpy as np
 # Main Function
 def determine_parameters(aoa, geom, aero):
     # Prepare arrays (3 sections: typically centerbody + inboard + outboard)
-    CL_sec      = np.zeros((4, len(aoa)))
-    CLalpha_sec = np.zeros((4, len(aoa)))
+    CL_sec      = np.zeros((3, len(aoa)))
+    CLalpha_sec = np.zeros((3, len(aoa)))
     sweeps = geom['Sweeps']
 
-    for i in range(4):
+    for i in range(3):
         # Zero-lift CL (sectional)
         CL0_sec = 0.225 * np.cos(np.deg2rad(sweeps[i]))
 

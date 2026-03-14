@@ -29,8 +29,8 @@ def bwb_cruise_analysis(plotting_flag,printing_flag,AspectRatio,Wingspan,Fuselag
 
     # ================= USER INPUT =================
     # Airfoil Dependent
-    geom['t_c']        = np.array([0.11, 0.11, 0.10, 0.10])
-    geom['x_c']        = np.array([0.3, 0.3, 0.38, 0.38])
+    geom['t_c']        = np.array([0.11, 0.11, 0.10])
+    geom['x_c']        = np.array([0.3, 0.3, 0.38])
     
     aero['e']          = 0.925          # Oswald efficiency (from reference)
     aero['Cla']        = 0.0960 * (180 / np.pi)  # 2D lift slope → per degree    

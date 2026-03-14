@@ -38,11 +38,11 @@ Ntolb = 4.44822
 # ============================================================
 
 # Geometry
-Nominal_Spans = np.array([ 4.10492,  9.39952, 17.15494,  4.14384])
-Nominal_Sweeps = np.array([66.57265,55.08672, 46.98989, 48.44947])
-Nominal_Roots      = np.array([44.63859, 31.85050,  6.10464,   0.93630])
-Nominal_Tips       = np.array( [31.85050,  6.10464,  0.93630,  0.13714])
-Nominal_Dihedrals  = np.array([0.00, 0.00, 8.00, 9.25])
+Nominal_Spans = np.array([4.08000092,  6.50000147, 19.00000429])
+Nominal_Sweeps = np.array([62.00003479, 60.00000848, 37.0000112 ])
+Nominal_Roots = np.array([43.00000105, 31.18300076,  9.00000022])
+Nominal_Tips = np.array([31.18300076,  9.00000022,  3.00000007])
+Nominal_Dihedrals = np.array([0.00, 0.00, 8.00])
 
 # Mission
 Nominal_Range = 7000 * 1852
@@ -53,25 +53,25 @@ Nominal_Fuel_Frac = 0.36
 Nominal_TSFC = 1.415e-5
 
 # Constraints
-MIN_rootcs = np.array([43.0, 31.18, 6, 1.3])
-MIN_tipcs = np.array([31.18, 6, 1.3, .5])
-MAX_sweeps = np.array([67, 67, 45, 45])
+MIN_rootcs = np.array([43.0, 31.18, 6.8])
+MIN_tipcs = np.array([31.18, 6.8, 2.1])
+MAX_sweeps = np.array([67, 67, 45])
 
-Variance = 0.1
-Variance2 = .1
+Variance = 0.3
+Variance2 = 0.3
 
 # ============================================================
 # 2. BUILD PSO BOUNDS
 # ============================================================
 
-span_lb = np.array([4.08, 6.50, Nominal_Spans[2]* (1 - Variance), 3])
-span_ub = Nominal_Spans * np.array([1 + Variance,7.5/Nominal_Spans[1],1 + Variance,5/Nominal_Spans[-1]])
+span_lb = np.array([4.08, 6.50, Nominal_Spans[2]* (1 - Variance)])
+span_ub = Nominal_Spans * np.array([1 + Variance,7.5/Nominal_Spans[1],1 + Variance])
 
 sweep_lb = Nominal_Sweeps * (1 - Variance)
 sweep_ub = MAX_sweeps
 
 root_lb = MIN_rootcs
-root_ub = Nominal_Roots * np.array([1 + Variance,1 + Variance,1 + Variance2,1 + Variance])
+root_ub = Nominal_Roots * np.array([1 + Variance,1 + Variance,1 + Variance2])
 
 tip_lb = MIN_tipcs
 tip_ub = Nominal_Tips * (1 + Variance)
@@ -97,7 +97,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     wing_id = vsp.FindGeomsWithName("BodyandWing")[0]
     vstabalizer_id = vsp.FindGeomsWithName("VStabalizer")[0]
 
-    tip_chords = np.append(root_chords[1:], tip_chords[3])
+    tip_chords = np.append(root_chords[1:], tip_chords[-1])
 
     # --- UPDATE GEOMETRY ---
     for i in range(len(spans)):
@@ -125,7 +125,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
 
     # --- DERIVED GEOMETRY ---
     # Compute Wingspan (Due to sweep)
-    Wing_wetted_Area = Swet / Sref * (WS_areas[2] + WS_areas[3]) * (M2Ft ** 2)
+    Wing_wetted_Area = Swet / Sref * (WS_areas[2]) * (M2Ft ** 2)
     Fuselage_wetted_Area = Swet / Sref * (WS_areas[0] + WS_areas[1]) * (M2Ft ** 2)
     Wing_sweep = sweeps[2]
     Wing_taper = WS_trs[2]
@@ -268,33 +268,27 @@ def constraint_penalty(result):
     # Compute Stress Ratio in Section 3
     stress_ratio = (result["Section 3 Stress"] * FOS) / mat_allowable
 
-    if stress_ratio > .9:       # Hard: 10% over → 1× L/D_ref
+    if stress_ratio > .95:       # Hard: 10% over → 1× L/D_ref
         penalty += LD_ref * 20.0 * (stress_ratio - .9)/.1
 
     # == Folding Wing Constraint ==
     spans = result["Spans"]
     cumspan3 = np.sum(spans[0:3])
-    span4 = spans[3]
 
-    if cumspan3 > 32.5:         # Hard: 1m error → ~1× L/D_ref
-        penalty += LD_ref * 2.0 * (abs(cumspan3 - 32.5) / 32.5)
-
-    if span4 > 5:                # Hard
-        penalty += LD_ref * 2.0 * ((span4 - 5) / 5)
-    elif span4 > 4:              # Soft
-        penalty += LD_ref * 0.1 * ((span4 - 4) / 4)
+    #if cumspan3 > 32.5:         # Hard: 1m error → ~1× L/D_ref
+    #    penalty += LD_ref * 2.0 * (abs(cumspan3 - 32.5) / 32.5)
     
     return penalty
 
-
+import traceback
 def evaluate_particle(args):
     particle, idx = args
 
     try:
-        spans = particle[0:4]
-        roots = particle[4:8]
-        tips = particle[8:12]
-        sweeps = particle[12:16]
+        spans = particle[0:3]
+        roots = particle[3:6]
+        tips = particle[6:9]
+        sweeps = particle[9:12]
 
         run_id = f"{os.getpid()}_{idx}_{uuid.uuid4().hex[:6]}"
 
@@ -318,7 +312,9 @@ def evaluate_particle(args):
         return cost
 
     except Exception as e:
+
         print("Worker failed:", e)
+        traceback.print_exc()
         return 1e15
 
 
@@ -370,7 +366,7 @@ if __name__ == "__main__":
     options = {"c1": 1, "c2": 2.0, "w": 0.5}
 
     optimizer = ps.single.GlobalBestPSO(
-        n_particles=25,
+        n_particles=125,
         dimensions=N_VARS,
         options=options,
         bounds=bounds,
@@ -378,7 +374,7 @@ if __name__ == "__main__":
 
     best_cost, best_pos = optimizer.optimize(
         pso_cost,
-        iters=20,
+        iters=30,
         verbose=True,
     )
 
@@ -390,11 +386,11 @@ if __name__ == "__main__":
     print("OPTIMIZATION COMPLETE")
     print("==============================")
 
-    best_spans = best_pos[0:4]
-    best_roots = best_pos[4:8]
-    best_tips = best_pos[8:12]
-    best_sweeps = best_pos[12:16]
-    best_tips = np.append(best_roots[1:], best_tips[3])
+    best_spans = best_pos[0:3]
+    best_roots = best_pos[3:6]
+    best_tips = best_pos[6:9]
+    best_sweeps = best_pos[9:12]
+    best_tips = np.append(best_roots[1:], best_tips[-1])
 
     best_result = analyze_design(
         spans=best_spans,

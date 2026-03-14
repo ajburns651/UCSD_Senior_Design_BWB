@@ -30,8 +30,8 @@ def compute_cg(weights_dict, Taper_Ratios, Root_Chords, Wing_Spans, Sweep_Angles
 
     Xac = Xc_quarter + del_Xac*np.sqrt(S)
 
-    numerator = A1_dcldalpha*S[0]*Xac[0] + A1_dcldalpha*S[1]*Xac[1] + A2_dcldalpha*S[2]*Xac[2] + A2_dcldalpha*S[3]*Xac[3]
-    denomenator = A1_dcldalpha*S[0] + A1_dcldalpha*S[1] + A2_dcldalpha*S[2] + A2_dcldalpha*S[3]
+    numerator = A1_dcldalpha*S[0]*Xac[0] + A1_dcldalpha*S[1]*Xac[1] + A2_dcldalpha*S[2]*Xac[2]
+    denomenator = A1_dcldalpha*S[0] + A1_dcldalpha*S[1] + A2_dcldalpha*S[2]
     Xnp = numerator/denomenator
 
     # ────────────────────────────────────────────────
