@@ -271,7 +271,7 @@ def get_root_moment_from_avl(
     base_name: str | Path,
     alpha_cruise: float = 2.0,
     CL_cruise: float = 0.185,
-    WS_spans: list = [4.08, 6.5, 19, 2],
+    WS_spans: list = [4.08, 6.5, 19],
     rho: float = 0.3,
     avl_executable: str = r"C:\Users\ajbur\OneDrive\Desktop\School\MAE FILES\BURNS\MAE 155A\BWB_Python\AVLFunctions\avl352.exe",
     timeout_seconds: int = 60,

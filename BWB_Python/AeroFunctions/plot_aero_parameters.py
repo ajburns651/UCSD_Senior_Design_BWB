@@ -65,6 +65,14 @@ def plot_aero(CL, CD, CL_star, CD_star, LD_max, geom, aoa_deg):
     ax4.plot(aoa_deg, LD, linewidth=1.8, color=(0, 0.5, 0), label='L/D')
     ax4.scatter(max_LD_aoa, max_LD_val, s=100, color='black', marker='o',
                 edgecolor='white', zorder=10, label=f'Max L/D = {max_LD_val:.2f}')
+
+    # Find cruise alpha (closest to CL_star) and plot cruise L/D
+    cruise_idx = np.argmin(np.abs(np.array(aoa_deg) - 0.896))
+    cruise_LD  = LD[cruise_idx]
+    cruise_aoa = aoa_deg[cruise_idx]
+    ax4.scatter(cruise_aoa, cruise_LD, s=100, color='red', marker='o',
+                edgecolor='black', zorder=10, label=f'Cruise L/D = {cruise_LD:.2f}')
+
     ax4.set_xlabel(r'$\alpha$ (deg)', fontsize=12)
     ax4.set_ylabel('L/D', fontsize=12)
     ax4.set_title('Aerodynamic Efficiency', fontsize=13)

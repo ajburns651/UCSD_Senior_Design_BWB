@@ -22,12 +22,14 @@ from Marimo import gross_weight
 M2Ft = 3.28084
 Ntolb = 4.44822
 
+
 def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
                    range_m, mach, payload_N, tsfc, altitude,
-                   run_id, save_vsp=False):
-
+                   run_id, save_vsp):
+    
     # 0. COMPUTE WEIGHT FRACTIONS
-    weight_dict = gross_weight.compute_fractions(Wp=payload_N, R=range_m, LD=23.42, cT=tsfc)  # Fix LD to BCR value, constant payload
+    weight_dict = gross_weight.compute_fractions(Wp=payload_N, R=range_m, LD=23.42,
+                                                 cT=tsfc)  # Fixed LD to Baseline BWB Value
     fuel_frac = weight_dict["Ws_Wg"]
 
     # 1. UPDATE VSP GEOMETRY
@@ -37,15 +39,15 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     wing_id = vsp.FindGeomsWithName("BodyandWing")[0]
     vstabalizer_id = vsp.FindGeomsWithName("VStabalizer")[0]
 
-    tip_chords = np.append(root_chords[1:], tip_chords[3])
+    tip_chords = np.append(root_chords[1:], tip_chords[2])
 
     # --- UPDATE GEOMETRY ---
     for i in range(len(spans)):
-        vsp.SetParmVal(wing_id, "Span",       f"XSec_{i + 1}", spans[i])
+        vsp.SetParmVal(wing_id, "Span", f"XSec_{i + 1}", spans[i])
         vsp.SetParmVal(wing_id, "Root_Chord", f"XSec_{i + 1}", root_chords[i])
-        vsp.SetParmVal(wing_id, "Tip_Chord",  f"XSec_{i + 1}", tip_chords[i])
-        vsp.SetParmVal(wing_id, "Sweep",      f"XSec_{i + 1}", sweeps[i])
-        vsp.SetParmVal(wing_id, "Dihedral",   f"XSec_{i + 1}", dihedrals[i])
+        vsp.SetParmVal(wing_id, "Tip_Chord", f"XSec_{i + 1}", tip_chords[i])
+        vsp.SetParmVal(wing_id, "Sweep", f"XSec_{i + 1}", sweeps[i])
+        vsp.SetParmVal(wing_id, "Dihedral", f"XSec_{i + 1}", dihedrals[i])
         vsp.Update()
 
     # Create Matching Angles For Outward Wings
@@ -53,26 +55,26 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     vsp.Update()
 
     basefilename = f"MC_Run_{run_id}"
-    vspfilename  = f"{basefilename}.vsp3"
+    vspfilename = f"{basefilename}.vsp3"
     vsp.WriteVSPFile(vspfilename)
 
     # 2. RUN CALCULATIONS
     Sref, Swet, WS_areas, VStabalizer_area, MAC, AR, b = GrabParams.sizing(
         vspfilename, wing_id, vstabalizer_id, len(spans))
 
-    CD0    = GrabParams.parasite(vspfilename, altitude, mach)
+    CD0 = GrabParams.parasite(vspfilename, altitude, mach)
     WS_trs = np.array([tip / root for root, tip in zip(root_chords, tip_chords)])
 
     # --- DERIVED GEOMETRY ---
-    Wing_wetted_Area    = Swet / Sref * (WS_areas[2] + WS_areas[3]) * (M2Ft ** 2)
+    Wing_wetted_Area = Swet / Sref * (WS_areas[2]) * (M2Ft ** 2)
     Fuselage_wetted_Area = Swet / Sref * (WS_areas[0] + WS_areas[1]) * (M2Ft ** 2)
-    Wing_sweep          = sweeps[2]
-    Wing_taper          = WS_trs[2]
-    Vt_area             = 2 * VStabalizer_area * (M2Ft ** 2)
-    Length_tail         = .55 * root_chords[0] * M2Ft
-    Length_fuselage     = root_chords[0] * M2Ft
-    Diameter_fuselage   = (spans[0] + 1.15) * 2 * M2Ft
-    Payload_lb          = payload_N / Ntolb
+    Wing_sweep = sweeps[2]
+    Wing_taper = WS_trs[2]
+    Vt_area = 2 * VStabalizer_area * (M2Ft ** 2)
+    Length_tail = .55 * root_chords[0] * M2Ft
+    Length_fuselage = root_chords[0] * M2Ft
+    Diameter_fuselage = (spans[0] + 1.15) * 2 * M2Ft
+    Payload_lb = payload_N / Ntolb
 
     # --- WEIGHTS ---
     Weight_Distributions = Weights.estimate_aircraft_weights(
@@ -89,8 +91,8 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
         payload_lb=Payload_lb,
         fuel_fraction=fuel_frac)
 
-    rho  = compute_density.compute(altitude)
-    q    = .5 * rho * (mach * 295.1) ** 2
+    rho = compute_density.compute(altitude)
+    q = .5 * rho * (mach * 295.1) ** 2
     MTOW = Weight_Distributions['weights_N']['total']
 
     LD_cruise, CL_cruise, Alpha_cruise, CDi_cruise, CDw_cruise, CD_total_cruise = \
@@ -144,16 +146,16 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     Root_moments = normalized_moments * Sref * b * q
 
     # --- STRUCTURAL STRESS (Section 3) ---
-    mat_allowable   = 430 * (10 ** 6)   # Pa  (7075 aluminium alloy)  FIX: was 430*10^6 (XOR, not power)
-    spar_cap_area   = 0.02              # m^2 (assumed)
-    FOS             = 1.5
+    mat_allowable = 900 * (10 ** 6)  # Pa  (7075 aluminium alloy)  FIX: was 430*10^6 (XOR, not power)
+    spar_cap_area = 0.0052  # m^2 (assumed)
+    FOS = 1.5
 
-    section3_moment          = Root_moments[2]
-    section3_rc              = root_chords[2]
-    section3_y               = (.07 * section3_rc) / 2        # (t/c) * chord / 2
-    moment_of_inertia        = 2 * spar_cap_area * (section3_y ** 2)   # parallel-axis theorem
-    section3_stress          = (section3_moment * section3_y) / moment_of_inertia
-    stress_ratio             = (section3_stress * FOS) / mat_allowable  # > 1.0 means failure
+    section3_moment = Root_moments[2]
+    section3_rc = root_chords[2]
+    section3_y = (.07 * section3_rc) / 2  # (t/c) * chord / 2
+    moment_of_inertia = 4 * spar_cap_area * (section3_y ** 2)  # parallel-axis theorem
+    section3_stress = (section3_moment * section3_y) / moment_of_inertia
+    stress_ratio = (section3_stress * FOS) / mat_allowable  # > 1.0 means failure
 
     SM = 100 * (NP - CG) / MAC
 
@@ -162,14 +164,13 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     # --- CLEANUP ---
     if save_vsp:
         extensions_to_delete = [
-            ".txt", ".csv", ".run",
-            '_CompGeom.csv', '_CompGeom.txt',
-            '_moment.txt', '_np.txt', '_ParasiteBuildUp.csv',  '.vsp3'
+            '.txt', '.csv', '.run', '_np.txt', '_moment.txt', '.avl',
+            '_CompGeom.csv', '_CompGeom.txt', '_ParasiteBuildUp.csv', '.vsp3' 
         ]
     else:
         extensions_to_delete = [
-            ".txt", ".csv", ".run",
-            '_CompGeom.csv', '_CompGeom.txt', '_ParasiteBuildUp.csv', '.vsp3'   # FIX: _moment.txt now cleaned up
+            '.txt', '.csv', '.run', '_np.txt', '_moment.txt', '.avl',
+            '_CompGeom.csv', '_CompGeom.txt', '_ParasiteBuildUp.csv', '.vsp3' 
         ]
 
     for ext in extensions_to_delete:
@@ -185,44 +186,44 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
     # readable by BWB_plot_results.py without any post-processing.
     return {
         # Identifiers
-        "Run_ID":            run_id,
+        "Run_ID": run_id,
 
         # Mission Level
-        "Range_(Nmi)":       range_m / 1852,
-        "Fuel_Fraction":     fuel_frac,
+        "Range_(Nmi)": range_m / 1852,
+        "Fuel_Fraction": fuel_frac,
 
         # Geometry
-        "Wingspan":         b,                      # computed full wingspan
-        "Spans":            spans,
-        "Sweeps":           sweeps,         
-        "Root_Chords":      root_chords,              
-        "Tip_Chords":       tip_chords,
-        "Swet":             Swet,
-        "Sref":             Sref,
-        "Taper Ratios":     WS_trs,
-        "Wing Section Areas": WS_areas,                
+        "Wingspan": b,  # computed full wingspan
+        "Spans": spans,
+        "Sweeps": sweeps,
+        "Root_Chords": root_chords,
+        "Tip_Chords": tip_chords,
+        "Swet": Swet,
+        "Sref": Sref,
+        "Taper Ratios": WS_trs,
+        "Wing Section Areas": WS_areas,
 
         # Aero 
-        "L_D_Cruise":        LD_cruise,
-        "CD0":               CD0,
-        "CDi_Cruise":        CDi_cruise,
-        "CDw_Cruise":        CDw_cruise,
-        "CD_Total_Cruise":   CD_total_cruise,
-        "CL_Cruise":         CL_cruise,
-        "Alpha_Cruise":      Alpha_cruise,
-        "AR":                AR,
-        "Neutral Point":     NP,
+        "L_D_Cruise": LD_cruise,
+        "CD0": CD0,
+        "CDi_Cruise": CDi_cruise,
+        "CDw_Cruise": CDw_cruise,
+        "CD_Total_Cruise": CD_total_cruise,
+        "CL_Cruise": CL_cruise,
+        "Alpha_Cruise": Alpha_cruise,
+        "AR": AR,
+        "Neutral Point": NP,
 
         # Structural
-        "MTOW":              MTOW,
-        "Static_Margin":     SM,
+        "MTOW": MTOW,
+        "Static_Margin": SM,
         "Section3_Stress_Pa": section3_stress,
-        "Stress_Ratio":       stress_ratio,          # > 1.0 → structural failure
-        "Root_Moment_Sec3":   Root_moments[2],
-        "Center of Gravity":  CG,
+        "Stress_Ratio": stress_ratio,  # > 1.0 → structural failure
+        "Root_Moment_Sec3": Root_moments[2],
+        "Center of Gravity": CG,
 
         # Other
-        "Cost_Per_Hour":     Cost_per_hr,
+        "Cost_Per_Hour": Cost_per_hr,
     }
 
 
@@ -230,6 +231,7 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
 # 1. PARALLEL WRAPPER FUNCTION
 # ────────────────────────────────────────────────
 import multiprocessing
+
 
 def run_simulation(args):
     """Unpacks the task arguments and runs the analysis."""
@@ -241,7 +243,7 @@ def run_simulation(args):
             spans=sim_spans, root_chords=sim_roots, tip_chords=sim_tips,
             sweeps=sim_sweeps, dihedrals=nom_dihedrals,
             range_m=sim_range, mach=sim_mach, payload_N=sim_payload,
-            tsfc=sim_tsfc, altitude=nom_alt, run_id=i)
+            tsfc=sim_tsfc, altitude=nom_alt, run_id=i, save_vsp=False)
         print(f"Run {i} Complete")
         return data
     except Exception as e:
@@ -254,47 +256,45 @@ def run_simulation(args):
 # ────────────────────────────────────────────────
 if __name__ == '__main__':
 
-    # ── NOMINAL GEOMETRY ────────────────────────────────────────────────────
-    Nominal_Spans = np.array([ 4.23996257,  6.89099048, 16.05983062,  3.61023083])
-    Nominal_Sweeps = np.array([64.34051028, 61.23501225, 43.96995778, 44.27820826])
-    Nominal_Roots = np.array([43.77391902, 31.69045771,  7.45722603,  2.3121])
-    Nominal_Tips = np.array([31.69045771,  7.45722603,  2.3121,  1.62094])
-    Nominal_Dihedrals = np.array([0.00, 0.00, 8.00, 9.25])
+    # Initial Conditions
+    Nominal_Spans = np.array([4.18, 7.49, 20.87])
+    Nominal_Roots = np.array([44.89, 32.98, 7.86])
+    Nominal_Tips = np.array([32.98, 7.86, 1.70])
+    Nominal_Sweeps = np.array([65, 57.46, 43.76])
+    Nominal_Dihedrals = np.array([0.00, 0.00, 8.00])
 
     # ── NOMINAL MISSION / PERFORMANCE ───────────────────────────────────────
-    Nominal_Range    = 7000 * 1852       # Nmi → metres
-    Nominal_Mach     = 0.85
-    Nominal_Altitude = 40000             # ft  (held constant)
-    Nominal_Payload  = 392000            # N
-    Nominal_TSFC     = 1.415e-5
+    Nominal_Range = 7000 * 1852  # Nmi → metres
+    Nominal_Mach = 0.85
+    Nominal_Altitude = 40000  # ft  (held constant)
+    Nominal_Payload = 392000  # N
+    Nominal_TSFC = 1.415e-5
 
     # ── GEOMETRY CONSTRAINTS ────────────────────────────────────────────────
-    MIN_rootcs  = np.array([43.0, 31.18, 0,  0])   # passenger/cargo fit
-    MIN_tipcs   = np.array([31.18, 0,    0,  0])
-    MAX_sweeps  = np.array([65,   65,    45, 45])
+    MIN_rootcs = np.array([43.0, 31.18, 0])  # passenger/cargo fit
+    MIN_tipcs = np.array([31.18, 0, 0])
+    MAX_sweeps = np.array([65, 65, 45])
 
     # ── SIMULATION CONFIG ───────────────────────────────────────────────────
-    N_Simulations  = 1
-    Variance       = 0.0               # ±430 % on geometry
+    N_Simulations = 1000
+    Variance = 0.3  # ± 30 % on geometry
 
     # ── STEP A: PRE-GENERATE ALL RANDOMISED INPUTS ──────────────────────────
-    N_DIMS  = 6
-    sampler = LatinHypercube(d=N_DIMS, seed=42)          # seed for reproducibility
-    samples = sampler.random(n=N_Simulations)             # shape: (N_Simulations, 7), all in [0, 1]
+    N_DIMS = 5
+    sampler = LatinHypercube(d=N_DIMS, seed=42)  # seed for reproducibility
+    samples = sampler.random(n=N_Simulations)  # shape: (N_Simulations, 7), all in [0, 1]
 
-    l_bounds = np.array([1 - Variance,          # span
-                1 - Variance,          # sweep[0]
-                1 - Variance,          # sweep[1]
-                1 - Variance,          # sweep[2]
-                1 - Variance,          # sweep[3]
-                1])                     # chord (can only grow)
+    l_bounds = np.array([1 - Variance,  # span
+                         1 - Variance,  # sweep[0]
+                         1 - Variance,  # sweep[1]
+                         1 - Variance,  # sweep[2]
+                         1])  # chord (can only grow)
 
-    u_bounds = np.array([1 + Variance,          # span
-                1 + Variance,          # sweep[0]
-                1 + Variance,          # sweep[1]
-                1 + Variance,          # sweep[2]
-                1 + Variance,          # sweep[3]
-                1 + Variance])          # chord
+    u_bounds = np.array([1 + Variance,  # span
+                         1 + Variance,  # sweep[0]
+                         1 + Variance,  # sweep[1]
+                         1 + Variance,  # sweep[2]
+                         1 + Variance])  # chord
 
     bad = np.where(l_bounds >= u_bounds)[0]
     if len(bad) > 0:
@@ -307,15 +307,15 @@ if __name__ == '__main__':
 
     tasks = []
     for i in range(N_Simulations):
-        span_factor  = scaled[i, 0]
-        sweep_factor = scaled[i, 1:5]
-        chord_factor = scaled[i, 5]
+        span_factor = scaled[i, 0]
+        sweep_factor = scaled[i, 1:4]
+        chord_factor = scaled[i, 4]
 
-        sim_spans  = Nominal_Spans  * span_factor
+        sim_spans = Nominal_Spans * span_factor
         sim_sweeps = np.minimum(Nominal_Sweeps * sweep_factor, MAX_sweeps)
-        sim_roots  = np.maximum(Nominal_Roots  * chord_factor, MIN_rootcs)
-        sim_tips   = np.maximum(np.append(sim_roots[1:], Nominal_Tips[-1] * chord_factor),MIN_tipcs)
-        sim_range  = Nominal_Range
+        sim_roots = np.maximum(Nominal_Roots * chord_factor, MIN_rootcs)
+        sim_tips = np.maximum(np.append(sim_roots[1:], Nominal_Tips[-1] * chord_factor), MIN_tipcs)
+        sim_range = Nominal_Range
 
         task = (i, sim_spans, sim_roots, sim_tips, sim_sweeps, Nominal_Dihedrals,
                 sim_range, Nominal_Mach, Nominal_Payload, Nominal_TSFC, Nominal_Altitude)
@@ -325,9 +325,9 @@ if __name__ == '__main__':
     num_cores = max(1, multiprocessing.cpu_count() - 4)
     print(f"Starting Monte Carlo ({N_Simulations} runs) on {num_cores} CPU cores...")
 
-    backup_interval  = 100
-    backup_filename  = "Monte_Carlo_Backup_Temp.csv"
-    results_log      = []
+    backup_interval = 100
+    backup_filename = "Monte_Carlo_Backup_Temp.csv"
+    results_log = []
 
     # ── STEP C: EXECUTE WITH PERIODIC BACKUPS ───────────────────────────────
     # maxtasksperchild=1 guards against VSP / AVL memory leaks between runs.
@@ -354,3 +354,4 @@ if __name__ == '__main__':
     print(f"\nAnalysis complete.  "
           f"Saved {len(results_log)}/{N_Simulations} successful runs → '{final_filename}'")
     print(f"Columns: {list(df_out.columns)}")
+ 

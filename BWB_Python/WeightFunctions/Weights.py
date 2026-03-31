@@ -30,13 +30,13 @@ class WeightBreakdown:
 
 def estimate_aircraft_weights(
     # VALUES OVERRIDED BY MASTER SCRIPT
-    Sw: float = 6069.12, # This is def wrong?? Lol idk how we got this before (Gets overriden by master)
+    Sw: float = 6069.12,
     AR: float = 4.92347,
     lambda_outer_deg: float = 37.0,
     taper: float = 0.3333,
     V_mach: float = 0.85,
     Svt: float = 21.554,
-    Sf: float = 6314.75, # This is def wrong?? Lol idk how we got this before (Gets overriden by master)
+    Sf: float = 6314.75,
     Lt_ft: float = 25 * 3.28084,
     L_ft: float = 39.221 * 3.28084,
     D_ft: float = 10.7132 * 3.28084,
@@ -226,29 +226,53 @@ def estimate_aircraft_weights(
             writer.writerow(["Notes:"])
             writer.writerow(["MTOW = Maximum Takeoff Weight"])
             writer.writerow([f"Converged: {converged}, Iterations: {i}"])
-            writer.writerow([f"Operating Empty Weight = {result['Wdg_converged_N']:,.0f} N"])
+            writer.writerow([f"Operating Empty Weight = {WTO*lb_to_N:,.0f} N"])
 
         print(f"→ Exported to {filename}")
 
     # ────────────────────────────────────────────────
-    # PIE CHART (improved to match MATLAB: interleave small slices + custom label positions)
+    # PIE CHART
     # ────────────────────────────────────────────────
     if plot_pie:
+        # 15 visually distinct colors — same vibrant palette style as the DOC cost chart,
+        # no two colors are repeated or closely similar
+        palette = [
+            "#E63946",  # vivid red        → Wing
+            "#F77F00",  # orange           → Vertical Tail
+            "#F4D35E",  # golden yellow    → Fuselage
+            "#3BB273",  # forest green     → Main Landing Gear
+            "#4CC9F0",  # sky blue         → Nose Landing Gear
+            "#1D3557",  # navy             → Installed Engine
+            "#9B5DE5",  # purple           → Fuel System
+            "#06D6A0",  # emerald teal     → Flight Controls
+            "#EF476F",  # hot pink         → Hydraulics
+            "#118AB2",  # ocean blue       → Avionics
+            "#FFB703",  # amber            → Electrical
+            "#6D6875",  # dusty mauve      → Air Conditioning & Anti-Ice
+            "#C77DFF",  # lavender         → Furnishings
+            "#80B918",  # lime green       → Fuel
+            "#073B4C",  # deep teal        → Payload
+        ]
+
         labels = component_names[:-1]  # exclude Total
         percents = np.array([percentages[attr] for attr in attr_names])
+        colors   = np.array(palette)
 
         small_thresh = small_slice_threshold
         small_idx = percents < small_thresh
         large_idx = ~small_idx
 
         small_percents = percents[small_idx]
-        small_labels = np.array(labels)[small_idx]
+        small_labels   = np.array(labels)[small_idx]
+        small_colors   = colors[small_idx]
         large_percents = percents[large_idx]
-        large_labels = np.array(labels)[large_idx]
+        large_labels   = np.array(labels)[large_idx]
+        large_colors   = colors[large_idx]
 
-        # Evenly distribute small slices (translated from MATLAB)
+        # Evenly distribute small slices among large ones (translated from MATLAB)
         new_percents = []
-        new_labels = []
+        new_labels   = []
+        new_colors   = []
         Ls = len(large_percents)
         Ss = len(small_percents)
         if Ss > 0:
@@ -259,34 +283,43 @@ def estimate_aircraft_weights(
         for ii in range(Ls):
             new_percents.append(large_percents[ii])
             new_labels.append(large_labels[ii])
-            if slot_counter < Ss and slot_positions[slot_counter] == ii + 1:  # 0-based adjust
+            new_colors.append(large_colors[ii])
+            if slot_counter < Ss and slot_positions[slot_counter] == ii + 1:
                 new_percents.append(small_percents[slot_counter])
                 new_labels.append(small_labels[slot_counter])
+                new_colors.append(small_colors[slot_counter])
                 slot_counter += 1
-        # Add any remaining small
         while slot_counter < Ss:
             new_percents.append(small_percents[slot_counter])
             new_labels.append(small_labels[slot_counter])
+            new_colors.append(small_colors[slot_counter])
             slot_counter += 1
 
         new_percents = np.array(new_percents)
-        new_labels = np.array(new_labels)
+        new_labels   = np.array(new_labels)
+        new_colors   = np.array(new_colors)
 
-        # Explode only small
+        # Explode only small slices
         explode = np.zeros(len(new_percents))
-        explode[new_percents < small_thresh] = 0.1  # slight explode
+        explode[new_percents < small_thresh] = 0.1
 
-        # Draw pie
-        fig, ax = plt.subplots(figsize=(10, 7))
+        fig, ax = plt.subplots(figsize=(10, 7), facecolor="white")
         wedges, texts, autotexts = ax.pie(
-            new_percents, explode=explode, labels=None, autopct='%1.1f%%',
-            shadow=False, startangle=90, pctdistance=0.85
+            new_percents,
+            explode=explode,
+            labels=None,
+            colors=new_colors,
+            autopct='%1.1f%%',
+            shadow=False,
+            startangle=90,
+            pctdistance=0.85,
+            wedgeprops=dict(linewidth=1.2, edgecolor="white"),
         )
 
         # Custom label formatting & positioning
         for j, (pct, txt) in enumerate(zip(new_percents, autotexts)):
             txt.set_fontsize(10)
-            txt.set_color('black')
+            txt.set_color('white')
             txt.set_horizontalalignment('center')
 
             x, y = txt.get_position()
@@ -305,11 +338,28 @@ def estimate_aircraft_weights(
                 if abs(dir_y) > 0.9:
                     outer_r = 1.12
                 txt.set_position((dir_x * outer_r, dir_y * outer_r))
+                txt.set_color('black')  # small-slice labels outside the pie → dark text
 
-        # Legend (reverse wedges if needed, but usually ok)
-        plt.legend(wedges, new_labels, loc='center left', bbox_to_anchor=(1.05, 0.5), fontsize=9)
+        # Legend with weight values
+        legend_labels = [
+            f"{lbl}  ({pct:.1f}%)"
+            for lbl, pct in zip(new_labels, new_percents)
+        ]
+        ax.legend(
+            wedges, legend_labels,
+            loc='center left',
+            bbox_to_anchor=(1.05, 0.5),
+            fontsize=9,
+            framealpha=0.95,
+            edgecolor="#cccccc",
+        )
 
-        plt.title(f"Aircraft Weight Breakdown\nMTOW ≈ {weights_N['total']:,.0f} N ({weights_kg['total']:,.0f} kg)", fontsize=14)
+        ax.set_title(
+            f"Aircraft Weight Breakdown\nMTOW ≈ {weights_N['total']:,.0f} N  ({weights_kg['total']:,.0f} kg)",
+            fontsize=14,
+            fontweight="bold",
+            pad=16,
+        )
         plt.tight_layout()
         plt.show()
 
@@ -326,6 +376,4 @@ if __name__ == "__main__":
         export_csv=False
     )
 
-    #print(f"\nWeight Fractions = {{ {', '.join(f'{k}: {v:.2f}%' for k,v in result['percentages'].items())} }}")
     print(f"\nWeights (N) = {{ {', '.join(f'{k}: {v:.0f}N' for k,v in result['weights_N'].items())} }}")
-

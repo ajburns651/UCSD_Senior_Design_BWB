@@ -1,0 +1,43 @@
+Aircraft Weight Breakdown Export,,
+,,
+Component,Weight (N),Percentage (%)
+Wing,"61,638.80",4.294
+Vertical Tail,"10,095.00",0.703
+Fuselage,"84,190.30",5.865
+Main Landing Gear,"47,745.00",3.326
+Nose Landing Gear,"1,023.30",0.071
+Installed Engine,"147,714.70",10.291
+Fuel System,"27,991.00",1.95
+Flight Controls,"85,198.00",5.936
+Hydraulics,"6,261.00",0.436
+Avionics,"6,479.30",0.451
+Electrical,"5,383.20",0.375
+Air Conditioning & Anti-Ice,"82,621.30",5.756
+Furnishings,"34,690.70",2.417
+Fuel,"442,362.80",30.818
+Payload,"392,000.00",27.31
+Total,"1,435,394.40",100
+,,
+,,
+Component,Weight (kg),Percentage (%)
+Wing,"6,285.40",4.294
+Vertical Tail,"1,029.40",0.703
+Fuselage,"8,585.00",5.865
+Main Landing Gear,"4,868.60",3.326
+Nose Landing Gear,104.3,0.071
+Installed Engine,"15,062.70",10.291
+Fuel System,"2,854.30",1.95
+Flight Controls,"8,687.80",5.936
+Hydraulics,638.4,0.436
+Avionics,660.7,0.451
+Electrical,548.9,0.375
+Air Conditioning & Anti-Ice,"8,425.00",5.756
+Furnishings,"3,537.50",2.417
+Fuel,"45,108.50",30.818
+Payload,"39,972.90",27.31
+Total,"146,369.50",100
+,,
+Notes:,,
+MTOW = Maximum Takeoff Weight,,
+"Converged: True, Iterations: 14",,
+"Operating Empty Weight = 1,435,394 N",,

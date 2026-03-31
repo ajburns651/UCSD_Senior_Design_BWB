@@ -115,7 +115,7 @@ def compute_cg(weights_dict, Taper_Ratios, Root_Chords, Wing_Spans, Sweep_Angles
             [cabin_cg_loc],
             [fuel_cg_loc]
         ])
-
+        
         # Aircraft CG location (m)
         total_moment = np.sum(C_weights * C_locations)
         total_weight = np.sum(C_weights)

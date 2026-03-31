@@ -8,6 +8,7 @@ import openvsp as vsp
 import pandas as pd
 import os
 import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import uuid
 from pathlib import Path
 import shutil
@@ -38,10 +39,11 @@ Ntolb = 4.44822
 # ============================================================
 
 # Geometry
-Nominal_Spans = np.array([4.08000092,  6.50000147, 19.00000429])
-Nominal_Sweeps = np.array([62.00003479, 60.00000848, 37.0000112 ])
-Nominal_Roots = np.array([43.00000105, 31.18300076,  9.00000022])
-Nominal_Tips = np.array([31.18300076,  9.00000022,  3.00000007])
+
+Nominal_Spans = np.array([ 4.08373908,  7.44966705, 20.51247145])
+Nominal_Sweeps = np.array([66.590491,   57.40578817, 44.59548356])
+Nominal_Roots = np.array([46.18196837, 32.49980379,  7.57755233])
+Nominal_Tips = np.array([32.49980379,  7.57755233,  1.67873103])
 Nominal_Dihedrals = np.array([0.00, 0.00, 8.00])
 
 # Mission
@@ -54,11 +56,11 @@ Nominal_TSFC = 1.415e-5
 
 # Constraints
 MIN_rootcs = np.array([43.0, 31.18, 6.8])
-MIN_tipcs = np.array([31.18, 6.8, 2.1])
+MIN_tipcs = np.array([31.18, 6.8, 1.6])
 MAX_sweeps = np.array([67, 67, 45])
 
-Variance = 0.3
-Variance2 = 0.3
+Variance = 0.2
+Variance2 = 0.2
 
 # ============================================================
 # 2. BUILD PSO BOUNDS
@@ -76,8 +78,8 @@ root_ub = Nominal_Roots * np.array([1 + Variance,1 + Variance,1 + Variance2])
 tip_lb = MIN_tipcs
 tip_ub = Nominal_Tips * (1 + Variance)
 
-lower_bounds = np.concatenate([span_lb, root_lb, tip_lb, sweep_lb])
-upper_bounds = np.concatenate([span_ub, root_ub, tip_ub, sweep_ub])
+lower_bounds = np.concatenate([span_lb, root_lb, [MIN_tipcs[2]], sweep_lb])
+upper_bounds = np.concatenate([span_ub, root_ub, [max(Nominal_Tips[2] * (1 + Variance), MIN_tipcs[2])], sweep_ub])
 bounds = (lower_bounds, upper_bounds)
 
 N_VARS = len(lower_bounds)
@@ -96,8 +98,6 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
 
     wing_id = vsp.FindGeomsWithName("BodyandWing")[0]
     vstabalizer_id = vsp.FindGeomsWithName("VStabalizer")[0]
-
-    tip_chords = np.append(root_chords[1:], tip_chords[-1])
 
     # --- UPDATE GEOMETRY ---
     for i in range(len(spans)):
@@ -203,14 +203,13 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
         timeout_seconds=15)
     Root_moments = normalized_moments * Sref * b * q
 
-    # Compute Section 3 Stress
-    spar_cap_area = .02       # m^2 (assumed???)y
+    spar_cap_area = .0052       # m^2 (assumed???) 2*.02 = .04 4
 
     # Compute Stress in Section 3
     section3_moment = Root_moments[2]
     section3_rc = root_chords[2]
     section3_y = (.07 * section3_rc)/2 # t/c * chord length divided by 2
-    moment_of_inertia = 2 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
+    moment_of_inertia = 4 * spar_cap_area * (section3_y ** 2)                         # 2 * area (Parallel axis theorem)
 
     section3_stress = (section3_moment * section3_y ) / moment_of_inertia   # Stress = My/I
  
@@ -252,24 +251,24 @@ def analyze_design(spans, root_chords, tip_chords, sweeps, dihedrals,
 
 def constraint_penalty(result):
     penalty = 0.0
-    LD_ref = 25.0  # reference objective scale
+    LD_ref = 15.0  # Scaling Objective
 
     # == Static Margin ==
     SM_takeoff = result["Static_Margin"][0]
-    if SM_takeoff < 0:           # Hard: -1 unit → 2× L/D_ref
-        penalty += LD_ref * 2.0 * (-SM_takeoff / 15)
+    if SM_takeoff < 8:           # Hard: -1 unit → 2× L/D_ref
+        penalty += LD_ref * 0.2 * (8 - SM_takeoff) / 8
     elif SM_takeoff > 15:        # Soft: nudge only
         penalty += LD_ref * 0.2 * ((SM_takeoff - 15) / 15)
 
     # == Bending Moments ==
-    mat_allowable = 430*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
+    mat_allowable = 900*(10**6)  # Pa https://en.wikipedia.org/wiki/7075_aluminium_alloy
     FOS = 1.5                 # Factor Of Safety
 
     # Compute Stress Ratio in Section 3
     stress_ratio = (result["Section 3 Stress"] * FOS) / mat_allowable
 
-    if stress_ratio > .95:       # Hard: 10% over → 1× L/D_ref
-        penalty += LD_ref * 20.0 * (stress_ratio - .9)/.1
+    if stress_ratio > 1.0:       # Hard: 10% over → 1× L/D_ref
+        penalty += LD_ref * 2.0 * (stress_ratio - 1.0)/.1
 
     # == Folding Wing Constraint ==
     spans = result["Spans"]
@@ -287,10 +286,12 @@ def evaluate_particle(args):
     try:
         spans = particle[0:3]
         roots = particle[3:6]
-        tips = particle[6:9]
-        sweeps = particle[9:12]
+        outer_tip = particle[6]
+        sweeps = particle[7:10]
 
         run_id = f"{os.getpid()}_{idx}_{uuid.uuid4().hex[:6]}"
+
+        tips = np.array([roots[1], roots[2], outer_tip])
 
         result = analyze_design(
         spans=spans,
@@ -306,8 +307,11 @@ def evaluate_particle(args):
         run_id=run_id,
         save_vsp=False)
 
-        cost = - result["L_D_Cruise"]
-        cost += constraint_penalty(result)
+        L_D = result["L_D_Cruise"]
+        #cost_scale = (25 - L_D) * abs(25 - L_D)
+
+        cost = -L_D + constraint_penalty(result)
+        print(f"L/D: {result['L_D_Cruise']:.2f}  |  penalty: {constraint_penalty(result):.2f}  |  cost: {cost:.2f}")
 
         return cost
 
@@ -333,12 +337,30 @@ def pso_cost_serial(X):
 # PARALLEL COST
 # ============================================================
 
-def pso_cost_parallel(X):
-    with mp.Pool(processes=N_PROCESSES) as pool:
-        args = [(X[i], i) for i in range(X.shape[0])]
-        costs = pool.map(evaluate_particle, args)
+# Create once at module level — workers stay alive entire run
+_executor = None
 
-    return np.array(costs)
+def get_executor():
+    global _executor
+    if _executor is None:
+        _executor = ProcessPoolExecutor(max_workers=N_PROCESSES)
+    return _executor
+
+def pso_cost_parallel(X):
+    executor = get_executor()
+    futures = {executor.submit(evaluate_particle, (X[i], i)): i 
+               for i in range(X.shape[0])}
+    
+    costs = np.zeros(X.shape[0])
+    for future in as_completed(futures):
+        i = futures[future]
+        try:
+            costs[i] = future.result()
+        except Exception as e:
+            print(f"Particle {i} failed: {e}")
+            costs[i] = 1e6
+    
+    return costs
 
 
 # ============================================================
@@ -357,7 +379,6 @@ def pso_cost(X):
 # ============================================================
 
 if __name__ == "__main__":
-
     mp.freeze_support()
 
     print("Parallel:", USE_PARALLEL)
@@ -366,31 +387,56 @@ if __name__ == "__main__":
     options = {"c1": 1, "c2": 2.0, "w": 0.5}
 
     optimizer = ps.single.GlobalBestPSO(
-        n_particles=125,
+        n_particles=25,
         dimensions=N_VARS,
         options=options,
         bounds=bounds,
     )
 
-    best_cost, best_pos = optimizer.optimize(
-        pso_cost,
-        iters=30,
-        verbose=True,
-    )
+    with ProcessPoolExecutor(max_workers=N_PROCESSES) as executor:
+
+        def pso_cost_parallel(X):
+            futures = {executor.submit(evaluate_particle, (X[i], i)): i
+                       for i in range(X.shape[0])}
+            costs = np.zeros(X.shape[0])
+            for future in as_completed(futures):
+                i = futures[future]
+                try:
+                    costs[i] = future.result()
+                except Exception as e:
+                    print(f"Particle {i} failed: {e}")
+                    costs[i] = 1e6
+            return costs
+
+        def pso_cost(X):
+            if USE_PARALLEL:
+                return pso_cost_parallel(X)
+            else:
+                return pso_cost_serial(X)
+
+        try:
+            best_cost, best_pos = optimizer.optimize(
+                pso_cost,
+                iters=15,
+                verbose=True,
+            )
+        except Exception as e:
+            print(f"Optimization failed: {e}")
+            raise
 
     # ========================================================
-    # 6. REPORT RESULTS
+    # REPORT RESULTS
     # ========================================================
 
     print("\n==============================")
     print("OPTIMIZATION COMPLETE")
     print("==============================")
 
-    best_spans = best_pos[0:3]
-    best_roots = best_pos[3:6]
-    best_tips = best_pos[6:9]
-    best_sweeps = best_pos[9:12]
-    best_tips = np.append(best_roots[1:], best_tips[-1])
+    best_spans     = best_pos[0:3]
+    best_roots     = best_pos[3:6]
+    best_outer_tip = best_pos[6]
+    best_sweeps    = best_pos[7:10]
+    best_tips      = np.array([best_roots[1], best_roots[2], best_outer_tip])
 
     best_result = analyze_design(
         spans=best_spans,

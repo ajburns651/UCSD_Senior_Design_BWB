@@ -210,15 +210,18 @@ for out_label, out_col in outputs.items():
 
 sens_df = pd.DataFrame(records)
 
-TOP_N = 10
+TOP_N = 4  # top 4 positive + top 4 negative
+
 fig, axes = plt.subplots(1, len(outputs), figsize=(24, 10), sharey=False)
 fig.patch.set_facecolor('white')
 
 for ax, (out_label, _) in zip(axes, outputs.items()):
-    sub = (sens_df[sens_df['Output'] == out_label]
-           .assign(abs_r=lambda d: d['r'].abs())
-           .nlargest(TOP_N, 'abs_r')
-           .sort_values('r'))
+    sub = sens_df[sens_df['Output'] == out_label].copy()
+
+    top_pos = sub[sub['r'] > 0].nlargest(TOP_N, 'r')
+    top_neg = sub[sub['r'] < 0].nsmallest(TOP_N, 'r')
+
+    sub = pd.concat([top_neg, top_pos]).sort_values('r')
 
     colors = ['#2980b9' if v < 0 else '#e74c3c' for v in sub['r']]
     bars = ax.barh(sub['Input'], sub['r'], color=colors, alpha=0.85,
@@ -250,7 +253,7 @@ legend_elements = [
 fig.legend(handles=legend_elements, loc='lower center', ncol=2,
            fontsize=LEGEND_SZ + 1, framealpha=0.6, bbox_to_anchor=(0.5, -0.03))
 
-fig.suptitle("Sensitivity Analysis — Spearman Rank Correlation  ·  Top 10 Drivers per Output",
+fig.suptitle("Sensitivity Analysis — Spearman Rank Correlation  ·  Top 4 Positive & Negative Drivers per Output",
              fontsize=17, fontweight='bold', color='#111111')
 plt.tight_layout(rect=[0, 0.04, 1, 0.95])
 plt.savefig('Plot3_Tornado.png', dpi=200, bbox_inches='tight',

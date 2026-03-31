@@ -54,16 +54,15 @@ def bwb_cruise_analysis(plotting_flag,printing_flag,AspectRatio,Wingspan,Fuselag
 
     q = 0.5 * rho * V**2
     CL_cruise = MTOW / (q * Sref)
+    alpha_cruise_deg = 0.896
+    CL_cruise        = float(np.interp(alpha_cruise_deg, aoa_deg, CL))
+    CD_total_cruise  = float(np.interp(alpha_cruise_deg, aoa_deg, CD))
+    CDw_cruise       = float(np.interp(alpha_cruise_deg, aoa_deg, CD_wave))
 
-    # Find closest point in the computed polar
-    idx = np.argmin(np.abs(CL - CL_cruise))
-    alpha_cruise_deg = interp(CL_cruise, CL, aoa_deg)
-    CD_total_cruise  = interp(CL_cruise, CL, CD)
-
-    # Component drag breakdown at cruise
-    k_factor = 1.0 / (np.pi * aero['e'] * geom['AR'])
+    k_factor   = 1.0 / (np.pi * aero['e'] * geom['AR'])
     CDi_cruise = k_factor * CL_cruise**2
-    CDw_cruise = CD_wave[idx]
+
+    LD_cruise  = CL_cruise / CD_total_cruise
 
     # ================= OUTPUTS =================
     if printing_flag==True:
