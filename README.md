@@ -53,10 +53,3 @@ Both PDF files are self-contained and provide full context for every analysis an
 If you use or reference this work, please cite:
 
 > Burns, A., Danieli, M., Gaeta, A., Mantrala, S., Savasere, S., & Zaltzman, G. (2026). *Manta BWB: Conceptual Design of an Ultra Fuel-Efficient 250-Passenger Blended Wing Body Aircraft*. MAE 155A, University of California, San Diego.
-
----
-
-**UC San Diego**  
-**Department of Mechanical and Aerospace Engineering**  
-**MAE 155A – Aerospace Engineering Design I**  
-**March 2026**
